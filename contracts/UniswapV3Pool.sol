@@ -26,6 +26,7 @@ import './interfaces/IERC20Minimal.sol';
 import './interfaces/callback/IUniswapV3MintCallback.sol';
 import './interfaces/callback/IUniswapV3SwapCallback.sol';
 import './interfaces/callback/IUniswapV3FlashCallback.sol';
+import "hardhat/console.sol";
 
 contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     using LowGasSafeMath for uint256;
@@ -592,6 +593,13 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         uint256 feeAmount;
     }
 
+    function logI256(int256 i) internal view {
+        if (i < 0)
+            console.log("-%s", uint256(-i));
+        else
+            console.log("%s", uint256(i));
+    }
+
     /// @inheritdoc IUniswapV3PoolActions
     function swap(
         address recipient,
@@ -600,6 +608,8 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         uint160 sqrtPriceLimitX96,
         bytes calldata data
     ) external override noDelegateCall returns (int256 amount0, int256 amount1) {
+        console.log("swap recipient = %s", recipient);
+
         require(amountSpecified != 0, 'AS');
 
         Slot0 memory slot0Start = slot0;
@@ -636,6 +646,10 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 protocolFee: 0,
                 liquidity: cache.liquidityStart
             });
+
+        console.log("state.amountSpecifiedRemaining = ");
+        logI256(state.amountSpecifiedRemaining);
+        console.log("state.sqrtPriceX96 ==  sqrtPriceLimitX96 = %s", state.sqrtPriceX96 ==  sqrtPriceLimitX96);
 
         // continue swapping as long as we haven't used the entire input/output and haven't reached the price limit
         while (state.amountSpecifiedRemaining != 0 && state.sqrtPriceX96 != sqrtPriceLimitX96) {
@@ -727,10 +741,16 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 // recompute unless we're on a lower tick boundary (i.e. already transitioned ticks), and haven't moved
                 state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
             }
+
+            console.log("while end");
+            console.log("state.amountSpecifiedRemaining = ");
+            logI256(state.amountSpecifiedRemaining);
+            console.log("state.sqrtPriceX96 ==  sqrtPriceLimitX96 = %s", state.sqrtPriceX96 ==  sqrtPriceLimitX96);
         }
 
         // update tick and write an oracle entry if the tick change
         if (state.tick != slot0Start.tick) {
+            console.log("update ticks");
             (uint16 observationIndex, uint16 observationCardinality) =
                 observations.write(
                     slot0Start.observationIndex,
@@ -747,6 +767,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 observationCardinality
             );
         } else {
+            console.log("update just price");
             // otherwise just update the price
             slot0.sqrtPriceX96 = state.sqrtPriceX96;
         }
@@ -768,6 +789,15 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             ? (amountSpecified - state.amountSpecifiedRemaining, state.amountCalculated)
             : (state.amountCalculated, amountSpecified - state.amountSpecifiedRemaining);
 
+        console.log("amount0 = ");
+        logI256(amount0);
+
+        console.log("amount1 = ");
+        logI256(amount1);
+
+        console.log("balance 0 = %s", balance0());
+        console.log("balance 1 = %s", balance1());
+
         // do the transfers and collect payment
         if (zeroForOne) {
             if (amount1 < 0) TransferHelper.safeTransfer(token1, recipient, uint256(-amount1));
@@ -782,6 +812,9 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
             require(balance1Before.add(uint256(amount1)) <= balance1(), 'IIA');
         }
+
+        console.log("balance 0 = %s", balance0());
+        console.log("balance 1 = %s", balance1());
 
         emit Swap(msg.sender, recipient, amount0, amount1, state.sqrtPriceX96, state.liquidity, state.tick);
         slot0.unlocked = true;
